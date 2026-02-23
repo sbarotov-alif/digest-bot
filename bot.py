@@ -89,7 +89,7 @@ def matches_keywords(text: str) -> list:
     return [kw for kw in KEYWORDS if kw.lower() in text_lower]
 
 
-async def fetch_new_posts(hours_back: int = 3) -> list:
+async def fetch_new_posts(hours_back: int = 12) -> list:
     """Читает посты за последние N часов."""
     client = TelegramClient("session_digest", API_ID, API_HASH)
     await client.start()
@@ -239,7 +239,7 @@ if __name__ == "__main__":
     schedule.every().day.at("14:00").do(run_digest)
 
     # Тест — запустить сразу при старте (уберите # чтобы проверить):
-    run_news()
+    # run_news()
 
     while True:
         schedule.run_pending()
