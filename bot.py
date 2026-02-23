@@ -158,16 +158,14 @@ async def send_news():
     bot = telegram.Bot(token=BOT_TOKEN)
 
     for post in new_posts:
-        text = post["text"][:400].replace("*", "").replace("_", "").replace("`", "")
-        if len(post["text"]) > 400:
-            text += "..."
         kw_str = ", ".join(post["keywords"][:3])
+        first_line = post["text"].split("\n")[0][:120].replace("*", "").replace("_", "").replace("`", "")
+        if len(first_line) == 120:
+            first_line += "..."
 
         message = (
-            f"🔔 *Новость из @{post['channel']}*\n"
-            f"🔑 _{kw_str}_\n\n"
-            f"{text}\n\n"
-            f"[→ Открыть пост]({post['url']})"
+            f"🔔 {first_line}\n"
+            f"[@{post['channel']}]({post['url']}) · _{kw_str}_"
         )
 
         try:
@@ -196,19 +194,14 @@ async def send_daily_digest():
         text = "📭 За сегодня не найдено новостей по вашим темам."
     else:
         date_str = (datetime.now(timezone.utc) + timedelta(hours=5)).strftime("%d.%m.%Y")
-        lines = [f"📰 *Итоги дня — {date_str}*\nВсего новостей: *{len(posts)}*\n" + "─" * 30]
+        lines = [f"🗞 *{date_str} — Дайджест финансовых новостей*\n"]
 
-        by_channel = {}
-        for post in posts:
-            by_channel.setdefault(post["channel"], []).append(post)
-
-        for channel, ch_posts in by_channel.items():
-            lines.append(f"\n📢 *@{channel}* ({len(ch_posts)})")
-            for post in ch_posts[:5]:  # максимум 5 постов с канала
-                t = post["text"][:200].replace("*", "").replace("_", "").replace("`", "")
-                if len(post["text"]) > 200:
-                    t += "..."
-                lines.append(f"• {t}\n[→ пост]({post['url']})")
+        for i, post in enumerate(posts, 1):
+            # Берём первую строку текста как заголовок
+            first_line = post["text"].split("\n")[0][:120].replace("*", "").replace("_", "").replace("`", "")
+            if len(first_line) == 120:
+                first_line += "..."
+            lines.append(f"{i}\\. {first_line} \\[@{post['channel']}\\]({post['url']})")
 
         text = "\n".join(lines)
 
