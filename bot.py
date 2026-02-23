@@ -89,7 +89,7 @@ def matches_keywords(text: str) -> list:
     return [kw for kw in KEYWORDS if kw.lower() in text_lower]
 
 
-async def fetch_new_posts(hours_back: int = 1) -> list:
+async def fetch_new_posts(hours_back: int = 3) -> list:
     """Читает посты за последние N часов."""
     client = TelegramClient("session_digest", API_ID, API_HASH)
     await client.start()
