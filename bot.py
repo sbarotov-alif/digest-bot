@@ -50,10 +50,21 @@ KEYWORDS = [
 
 # Рабочие часы по Ташкенту (UTC+5)
 WORK_HOUR_START = 11   # 11:00 Ташкент = 06:00 UTC
-WORK_HOUR_END = 22     # 21:00 Ташкент = 16:00 UTC
+WORK_HOUR_END = 22     # 22:00 Ташкент = 17:00 UTC
 
 # Файл для хранения уже отправленных постов
 SENT_FILE = "sent_posts.json"
+
+# Красивые названия каналов
+CHANNEL_NAMES = {
+    "spotuz": "Spot.uz",
+    "RepostUZ": "Repost UZ",
+    "davletovuz": "Davletov UZ",
+    "bankmijoz": "Bank Mijoz",
+    "kurbanoffnet": "Kurbanoff",
+    "Bankir": "Bankir.uz",
+    "bankirlaruchun": "Bankirlar Uchun",
+}
 
 # ─────────────────────────────────────────────
 
@@ -194,14 +205,19 @@ async def send_daily_digest():
         text = "📭 За сегодня не найдено новостей по вашим темам."
     else:
         date_str = (datetime.now(timezone.utc) + timedelta(hours=5)).strftime("%d.%m.%Y")
-        lines = [f"🗞 *{date_str} — Дайджест финансовых новостей*\n"]
+        lines = [f"🗞 *{date_str} — Финансовые новости*\n"]
 
-        for i, post in enumerate(posts, 1):
-            # Берём первую строку текста как заголовок
-            first_line = post["text"].split("\n")[0][:120].replace("*", "").replace("_", "").replace("`", "")
-            if len(first_line) == 120:
-                first_line += "..."
-            lines.append(f"{i}\\. {first_line} \\[@{post['channel']}\\]({post['url']})")
+        # Группируем по каналам
+        by_channel = {}
+        for post in posts:
+            by_channel.setdefault(post["channel"], []).append(post)
+
+        for channel, ch_posts in by_channel.items():
+            ch_name = CHANNEL_NAMES.get(channel, channel)
+            lines.append(f"\n*{ch_name}*")
+            for post in ch_posts:
+                first_line = post["text"].split("\n")[0][:100].replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
+                lines.append(f"→ {first_line} [\\.\\.\\.]({post['url']})")
 
         text = "\n".join(lines)
 
