@@ -239,7 +239,8 @@ if __name__ == "__main__":
     schedule.every().day.at("14:00").do(run_digest)
 
     # Тест — запустить сразу при старте (уберите # чтобы проверить):
-    # run_news()
+    import os; os.remove("sent_posts.json") if os.path.exists("sent_posts.json") else None
+    run_news()
 
     while True:
         schedule.run_pending()
