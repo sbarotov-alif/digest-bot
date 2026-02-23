@@ -239,7 +239,7 @@ if __name__ == "__main__":
     schedule.every().day.at("14:00").do(run_digest)
 
     # Тест — запустить сразу при старте (уберите # чтобы проверить):
-    # run_news()
+    run_news()
 
     while True:
         schedule.run_pending()
