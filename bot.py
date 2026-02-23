@@ -50,7 +50,7 @@ KEYWORDS = [
 
 # Рабочие часы по Ташкенту (UTC+5)
 WORK_HOUR_START = 11   # 11:00 Ташкент = 06:00 UTC
-WORK_HOUR_END = 21     # 21:00 Ташкент = 16:00 UTC
+WORK_HOUR_END = 22     # 21:00 Ташкент = 16:00 UTC
 
 # Файл для хранения уже отправленных постов
 SENT_FILE = "sent_posts.json"
