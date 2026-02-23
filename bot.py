@@ -182,7 +182,7 @@ if __name__ == "__main__":
     schedule.every().day.at(SEND_TIME_UTC).do(run_digest)
 
     # Раскомментируйте строку ниже чтобы запустить СРАЗУ для теста:
-    # run_digest()
+    run_digest()
 
     while True:
         schedule.run_pending()
