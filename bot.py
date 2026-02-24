@@ -49,7 +49,7 @@ KEYWORDS = [
 ]
 
 # Рабочие часы по Ташкенту (UTC+5)
-WORK_HOUR_START = 11   # 11:00 Ташкент = 06:00 UTC
+WORK_HOUR_START = 10   # 10:00 Ташкент = 05:00 UTC
 WORK_HOUR_END = 22     # 22:00 Ташкент = 17:00 UTC
 
 # Файл для хранения уже отправленных постов
@@ -100,7 +100,7 @@ def matches_keywords(text: str) -> list:
     return [kw for kw in KEYWORDS if kw.lower() in text_lower]
 
 
-async def fetch_new_posts(hours_back: int = 12) -> list:
+async def fetch_new_posts(hours_back: int = 1) -> list:
     """Читает посты за последние N часов."""
     client = TelegramClient("session_digest", API_ID, API_HASH)
     await client.start()
@@ -205,7 +205,7 @@ async def send_daily_digest():
         text = "📭 За сегодня не найдено новостей по вашим темам."
     else:
         date_str = (datetime.now(timezone.utc) + timedelta(hours=5)).strftime("%d.%m.%Y")
-        lines = [f"🗞 *{date_str} — Финансовые новости*\n"]
+        lines = [f"🗞 *{date_str} — Лови новости братан)*\n"]
 
         # Группируем по каналам
         by_channel = {}
@@ -245,7 +245,7 @@ def run_digest():
 
 if __name__ == "__main__":
     logger.info("🤖 Бот запущен!")
-    logger.info("📡 Мониторинг каждый час с 11:00 до 21:00 по Ташкенту")
+    logger.info("📡 Мониторинг каждый час с 10:00 до 22:00 по Ташкенту")
     logger.info("📰 Ежедневный дайджест в 19:00 по Ташкенту")
 
     # Проверка каждый час (каждые 60 минут)
