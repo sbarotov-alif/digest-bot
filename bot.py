@@ -1,6 +1,6 @@
 """
 Telegram News Bot
-- Каждый час с 11:00 до 21:00 (Ташкент) проверяет каналы и отправляет новые релевантные новости
+- Каждый час с 10:00 до 22:00 (Ташкент) проверяет каналы и отправляет новые релевантные новости
 - Дубли не отправляет (запоминает уже отправленные)
 - Ежедневный дайджест в 19:00
 """
@@ -34,18 +34,42 @@ SOURCE_CHANNELS = [
     "kurbanoffnet",
     "Bankir",
     "bankirlaruchun",
+    "makarenko_channel",
+    "na_begu",
+    "uzbekistan_online_novosti_uznews",
+    "uzbekfintech",
+    "soliqnews",
+    "centralbankuzbekistan",
+    "bankxabar",
+    "bankers_uz",
+    "FinansistUZ",
+    "fiskaltahlil",
+    "bhblaw",
+    "vsebudethorosho",
 ]
 
 # Ключевые слова (регистр не важен)
 KEYWORDS = [
+    # Банки
     "банк", "банки", "банков",
-    "кредит", "кредиты", "кредитный",
-    "бизнес", "b2b",
-    "рассрочка", "bnpl",
-    "кредитная карта", "кредитные карты",
-    "tbc", "алиф", "alif",
+    "markaziy bank", "цб", "центральный банк",
+    "тбс банк", "tbc",
+    "алиф", "alif",
     "анорбанк", "anorbank",
     "ипотекабанк", "ipotekabank",
+    # Кредиты и финансы
+    "кредит", "кредиты", "кредитный",
+    "рассрочка", "nasiya",
+    "bnpl", "halol savdo",
+    "muddatli to'lov",
+    "факторинг",
+    # Исламские финансы
+    "исламские финансы",
+    "халяльные кредиты", "халяль",
+    "мурабаха", "murobaha",
+    # Бизнес
+    "бизнес", "b2b",
+    "кредитная карта", "кредитные карты",
 ]
 
 # Рабочие часы по Ташкенту (UTC+5)
@@ -64,6 +88,18 @@ CHANNEL_NAMES = {
     "kurbanoffnet": "Kurbanoff",
     "Bankir": "Bankir.uz",
     "bankirlaruchun": "Bankirlar Uchun",
+    "makarenko_channel": "Makarenko",
+    "na_begu": "На бегу",
+    "uzbekistan_online_novosti_uznews": "UZ News",
+    "uzbekfintech": "Uzbek Fintech",
+    "soliqnews": "Soliq News",
+    "centralbankuzbekistan": "ЦБ Узбекистана",
+    "bankxabar": "Bank Xabar",
+    "bankers_uz": "Bankers UZ",
+    "FinansistUZ": "Finansist UZ",
+    "fiskaltahlil": "Fiskal Tahlil",
+    "bhblaw": "BHB Law",
+    "vsebudethorosho": "Всё будет хорошо",
 }
 
 # ─────────────────────────────────────────────
@@ -82,7 +118,6 @@ def load_sent() -> set:
 
 def save_sent(sent: set):
     """Сохраняет список отправленных постов."""
-    # Храним только последние 5000 чтобы файл не разрастался
     sent_list = list(sent)[-5000:]
     with open(SENT_FILE, "w") as f:
         json.dump(sent_list, f)
@@ -106,6 +141,7 @@ async def fetch_new_posts(hours_back: int = 1) -> list:
     await client.start()
 
     results = []
+    seen_texts = set()  # для защиты от дублей внутри одного запроса
     since = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
     for channel in SOURCE_CHANNELS:
@@ -128,15 +164,24 @@ async def fetch_new_posts(hours_back: int = 1) -> list:
                 if msg.date.replace(tzinfo=timezone.utc) < since:
                     continue
                 found_kw = matches_keywords(msg.message)
-                if found_kw:
-                    results.append({
-                        "id": f"{channel}_{msg.id}",
-                        "channel": channel,
-                        "text": msg.message,
-                        "date": msg.date,
-                        "url": f"https://t.me/{channel}/{msg.id}",
-                        "keywords": found_kw,
-                    })
+                if not found_kw:
+                    continue
+
+                # Проверка на дубль по тексту (первые 80 символов)
+                text_key = msg.message[:80].strip().lower()
+                if text_key in seen_texts:
+                    logger.info(f"⏭ Дубль пропущен из {channel}")
+                    continue
+                seen_texts.add(text_key)
+
+                results.append({
+                    "id": f"{channel}_{msg.id}",
+                    "channel": channel,
+                    "text": msg.message,
+                    "date": msg.date,
+                    "url": f"https://t.me/{channel}/{msg.id}",
+                    "keywords": found_kw,
+                })
 
             logger.info(f"✅ {channel}: проверено")
 
@@ -187,7 +232,7 @@ async def send_news():
                 disable_web_page_preview=True,
             )
             sent.add(post["id"])
-            await asyncio.sleep(2)  # пауза между сообщениями
+            await asyncio.sleep(2)
         except Exception as e:
             logger.error(f"❌ Ошибка отправки: {e}")
 
@@ -217,9 +262,22 @@ async def send_daily_digest():
             lines.append(f"\n*{ch_name}*")
             for post in ch_posts:
                 first_line = post["text"].split("\n")[0][:100].replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
-                lines.append(f"→ {first_line} [\\.\\.\\.]({post['url']})")
+                lines.append(f"→ {first_line} [...]\n")
+                # ссылка отдельной строкой чтобы работала
+            lines[-1] = lines[-1].rstrip("\n")  # убираем лишний отступ после последней новости канала
 
-        text = "\n".join(lines)
+        # Заменяем [...] на кликабельные ссылки
+        result_lines = []
+        post_index = 0
+        all_posts_flat = [p for ch_posts in by_channel.values() for p in ch_posts]
+        for line in lines:
+            if "[...]" in line and post_index < len(all_posts_flat):
+                url = all_posts_flat[post_index]["url"]
+                line = line.replace("[...]", f"[...]({url})")
+                post_index += 1
+            result_lines.append(line)
+
+        text = "\n".join(result_lines)
 
     bot = telegram.Bot(token=BOT_TOKEN)
     max_len = 4000
@@ -256,7 +314,7 @@ if __name__ == "__main__":
 
     # Тест — запустить сразу при старте (уберите # чтобы проверить):
     # run_news()
-    run_digest()
+    # run_digest()
 
     while True:
         schedule.run_pending()
