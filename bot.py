@@ -2,7 +2,7 @@
 Telegram News Bot
 - Каждый час с 10:00 до 22:00 (Ташкент) проверяет каналы и отправляет новые релевантные новости
 - Дубли не отправляет (запоминает уже отправленные)
-- Ежедневный дайджест в 19:00
+- Ежедневный дайджест в 19:00 + Топ-5 постов по просмотрам
 """
 
 import asyncio
@@ -109,7 +109,6 @@ logger = logging.getLogger(__name__)
 
 
 def load_sent() -> set:
-    """Загружает список уже отправленных постов."""
     if os.path.exists(SENT_FILE):
         with open(SENT_FILE, "r") as f:
             return set(json.load(f))
@@ -117,31 +116,28 @@ def load_sent() -> set:
 
 
 def save_sent(sent: set):
-    """Сохраняет список отправленных постов."""
     sent_list = list(sent)[-5000:]
     with open(SENT_FILE, "w") as f:
         json.dump(sent_list, f)
 
 
 def is_working_hours() -> bool:
-    """Проверяет что сейчас рабочие часы по Ташкенту."""
     tashkent_hour = (datetime.now(timezone.utc) + timedelta(hours=5)).hour
     return WORK_HOUR_START <= tashkent_hour < WORK_HOUR_END
 
 
 def matches_keywords(text: str) -> list:
-    """Возвращает список найденных ключевых слов."""
     text_lower = text.lower()
     return [kw for kw in KEYWORDS if kw.lower() in text_lower]
 
 
-async def fetch_new_posts(hours_back: int = 1) -> list:
-    """Читает посты за последние N часов."""
+async def fetch_new_posts(hours_back: int = 1, with_views: bool = False) -> list:
+    """Читает посты за последние N часов. with_views=True — собирает просмотры для топа."""
     client = TelegramClient("session_digest", API_ID, API_HASH)
     await client.start()
 
     results = []
-    seen_texts = set()  # для защиты от дублей внутри одного запроса
+    seen_texts = set()
     since = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
     for channel in SOURCE_CHANNELS:
@@ -167,12 +163,15 @@ async def fetch_new_posts(hours_back: int = 1) -> list:
                 if not found_kw:
                     continue
 
-                # Проверка на дубль по тексту (первые 80 символов)
+                # Защита от дублей по тексту
                 text_key = msg.message[:80].strip().lower()
                 if text_key in seen_texts:
                     logger.info(f"⏭ Дубль пропущен из {channel}")
                     continue
                 seen_texts.add(text_key)
+
+                # Просмотры (только если запрашиваем для топа)
+                views = getattr(msg, "views", 0) or 0
 
                 results.append({
                     "id": f"{channel}_{msg.id}",
@@ -181,6 +180,7 @@ async def fetch_new_posts(hours_back: int = 1) -> list:
                     "date": msg.date,
                     "url": f"https://t.me/{channel}/{msg.id}",
                     "keywords": found_kw,
+                    "views": views,
                 })
 
             logger.info(f"✅ {channel}: проверено")
@@ -204,7 +204,6 @@ async def send_news():
 
     posts = await fetch_new_posts(hours_back=1)
     sent = load_sent()
-
     new_posts = [p for p in posts if p["id"] not in sent]
 
     if not new_posts:
@@ -241,47 +240,55 @@ async def send_news():
 
 
 async def send_daily_digest():
-    """Ежедневный дайджест в 19:00."""
+    """Ежедневный дайджест в 19:00 с топ-5 по просмотрам."""
     logger.info("📰 Отправка ежедневного дайджеста...")
 
-    posts = await fetch_new_posts(hours_back=24)
+    posts = await fetch_new_posts(hours_back=21, with_views=True)  # с 00:00 до 21:00
 
     if not posts:
         text = "📭 За сегодня не найдено новостей по вашим темам."
-    else:
-        date_str = (datetime.now(timezone.utc) + timedelta(hours=5)).strftime("%d.%m.%Y")
-        lines = [f"🗞 *{date_str} — Лови новости братан)*\n"]
+        bot = telegram.Bot(token=BOT_TOKEN)
+        await bot.send_message(chat_id=TARGET_CHANNEL, text=text)
+        return
 
-        # Группируем по каналам
-        by_channel = {}
-        for post in posts:
-            by_channel.setdefault(post["channel"], []).append(post)
+    date_str = (datetime.now(timezone.utc) + timedelta(hours=5)).strftime("%d.%m.%Y")
 
-        for channel, ch_posts in by_channel.items():
-            ch_name = CHANNEL_NAMES.get(channel, channel)
-            lines.append(f"\n*{ch_name}*")
-            for post in ch_posts:
-                first_line = post["text"].split("\n")[0][:100].replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
-                lines.append(f"→ {first_line} [...]\n")
-                # ссылка отдельной строкой чтобы работала
-            lines[-1] = lines[-1].rstrip("\n")  # убираем лишний отступ после последней новости канала
+    # ── Часть 1: Дайджест по каналам ──
+    lines = [f"🗞 *{date_str} — Лови новости братан)*\n"]
 
-        # Заменяем [...] на кликабельные ссылки
-        result_lines = []
-        post_index = 0
-        all_posts_flat = [p for ch_posts in by_channel.values() for p in ch_posts]
-        for line in lines:
-            if "[...]" in line and post_index < len(all_posts_flat):
-                url = all_posts_flat[post_index]["url"]
-                line = line.replace("[...]", f"[...]({url})")
-                post_index += 1
-            result_lines.append(line)
+    by_channel = {}
+    for post in posts:
+        by_channel.setdefault(post["channel"], []).append(post)
 
-        text = "\n".join(result_lines)
+    for channel, ch_posts in by_channel.items():
+        ch_name = CHANNEL_NAMES.get(channel, channel)
+        lines.append(f"\n*{ch_name}*")
+        for post in ch_posts:
+            first_line = post["text"].split("\n")[0][:100].replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
+            lines.append(f"→ {first_line} [...]({post['url']})\n")
 
+    digest_text = "\n".join(lines)
+
+    # ── Часть 2: Топ-5 по просмотрам ──
+    top5 = sorted(posts, key=lambda x: x["views"], reverse=True)[:5]
+
+    top_lines = ["\n🔥 *Топ-5 постов дня по просмотрам*\n"]
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    for i, post in enumerate(top5):
+        ch_name = CHANNEL_NAMES.get(post["channel"], post["channel"])
+        first_line = post["text"].split("\n")[0][:100].replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
+        views_str = f"{post['views']:,}".replace(",", " ")
+        top_lines.append(f"{medals[i]} {first_line} [...]({post['url']})")
+        top_lines.append(f"    👁 {views_str} просмотров · {ch_name}\n")
+
+    top_text = "\n".join(top_lines)
+
+    # ── Отправка ──
     bot = telegram.Bot(token=BOT_TOKEN)
+    full_text = digest_text + top_text
+
     max_len = 4000
-    parts = [text[i:i+max_len] for i in range(0, len(text), max_len)]
+    parts = [full_text[i:i+max_len] for i in range(0, len(full_text), max_len)]
     for part in parts:
         await bot.send_message(
             chat_id=TARGET_CHANNEL,
@@ -291,7 +298,7 @@ async def send_daily_digest():
         )
         await asyncio.sleep(1)
 
-    logger.info("✅ Дайджест отправлен!")
+    logger.info("✅ Дайджест с топ-5 отправлен!")
 
 
 def run_news():
@@ -304,7 +311,7 @@ def run_digest():
 if __name__ == "__main__":
     logger.info("🤖 Бот запущен!")
     logger.info("📡 Мониторинг каждый час с 10:00 до 22:00 по Ташкенту")
-    logger.info("📰 Ежедневный дайджест в 19:00 по Ташкенту")
+    logger.info("📰 Ежедневный дайджест + Топ-5 в 19:00 по Ташкенту")
 
     # Проверка каждый час (каждые 60 минут)
     schedule.every(60).minutes.do(run_news)
