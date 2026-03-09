@@ -342,7 +342,7 @@ async def send_daily_digest():
         first_line_linked = linkify_last_word(first_line, post["url"])
         views_str = f"{post['views']:,}".replace(",", " ")
         top_lines.append(f"{medals[i]} {first_line_linked}")
-        top_lines.append(f"    👁 {views_str} просмотров · {ch_name}\n")
+        top_lines.append(f"     {views_str} просмотров · {ch_name}\n")
 
     top_text = "\n".join(top_lines)
 
