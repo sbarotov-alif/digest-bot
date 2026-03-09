@@ -345,12 +345,12 @@ async def send_daily_digest():
         top_lines.append(f"    👁 {views_str} просмотров · {ch_name}\n")
 
     top_text = "\n".join(top_lines)
-    full_text = digest_text + top_text
 
     bot = telegram.Bot(token=BOT_TOKEN)
     max_len = 4000
-    parts = [full_text[i:i+max_len] for i in range(0, len(full_text), max_len)]
-    for part in parts:
+
+    # Сначала отправляем дайджест
+    for part in [digest_text[i:i+max_len] for i in range(0, len(digest_text), max_len)]:
         await bot.send_message(
             chat_id=TARGET_CHANNEL,
             text=part,
@@ -359,7 +359,20 @@ async def send_daily_digest():
         )
         await asyncio.sleep(1)
 
-    logger.info("✅ Дайджест с топ-5 отправлен!")
+    # Пауза между сообщениями
+    await asyncio.sleep(3)
+
+    # Затем топ-5 отдельным сообщением
+    for part in [top_text[i:i+max_len] for i in range(0, len(top_text), max_len)]:
+        await bot.send_message(
+            chat_id=TARGET_CHANNEL,
+            text=part,
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
+        )
+        await asyncio.sleep(1)
+
+    logger.info("✅ Дайджест и топ-5 отправлены отдельными сообщениями!")
 
 
 def run_news():
