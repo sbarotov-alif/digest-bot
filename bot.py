@@ -3,18 +3,21 @@ Telegram News Bot
 - Каждый час с 10:00 до 22:00 (Ташкент) проверяет каналы и отправляет новые релевантные новости
 - Дубли не отправляет (запоминает уже отправленные)
 - Ежедневный дайджест в 19:00 + Топ-5 постов по просмотрам
+- Узбекские тексты автоматически переводятся на русский
 """
 
 import asyncio
 import logging
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
 import telegram
 import schedule
 import time
+import anthropic
 
 # ─────────────────────────────────────────────
 # НАСТРОЙКИ
@@ -24,6 +27,7 @@ API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 TARGET_CHANNEL = os.environ.get("TARGET_CHANNEL")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 # Каналы для мониторинга
 SOURCE_CHANNELS = [
@@ -50,31 +54,27 @@ SOURCE_CHANNELS = [
 
 # Ключевые слова (регистр не важен)
 KEYWORDS = [
-    # Банки
     "банк", "банки", "банков",
     "markaziy bank", "цб", "центральный банк",
     "тбс банк", "tbc",
     "алиф", "alif",
     "анорбанк", "anorbank",
     "ипотекабанк", "ipotekabank",
-    # Кредиты и финансы
     "кредит", "кредиты", "кредитный",
     "рассрочка", "nasiya",
     "bnpl", "halol savdo",
     "muddatli to'lov",
     "факторинг",
-    # Исламские финансы
     "исламские финансы",
     "халяльные кредиты", "халяль",
     "мурабаха", "murobaha",
-    # Бизнес
     "бизнес", "b2b",
     "кредитная карта", "кредитные карты",
 ]
 
 # Рабочие часы по Ташкенту (UTC+5)
-WORK_HOUR_START = 10   # 10:00 Ташкент = 05:00 UTC
-WORK_HOUR_END = 22     # 22:00 Ташкент = 17:00 UTC
+WORK_HOUR_START = 10
+WORK_HOUR_END = 22
 
 # Файл для хранения уже отправленных постов
 SENT_FILE = "sent_posts.json"
@@ -108,6 +108,60 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s — %(message)s")
 logger = logging.getLogger(__name__)
 
 
+def is_uzbek(text: str) -> bool:
+    """Определяет узбекский текст по характерным буквам и словам."""
+    uzbek_chars = "ʻʼ"
+    uzbek_words = ["va", "bu", "uchun", "bilan", "ham", "emas", "lekin",
+                   "ning", "dan", "ga", "da", "ni", "lar", "dir"]
+    text_lower = text.lower()
+    if any(c in text for c in uzbek_chars):
+        return True
+    word_count = sum(1 for w in uzbek_words if f" {w} " in f" {text_lower} ")
+    return word_count >= 2
+
+
+def translate_to_russian(text: str) -> str:
+    """Переводит текст на русский через Claude API."""
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Переведи этот текст на русский язык. "
+                        "Верни ТОЛЬКО перевод, без пояснений и комментариев:\n\n"
+                        + text
+                    )
+                }
+            ]
+        )
+        return message.content[0].text.strip()
+    except Exception as e:
+        logger.error(f"❌ Ошибка перевода: {e}")
+        return text
+
+
+def get_first_line(text: str, max_len: int = 120) -> str:
+    """Берёт первую строку текста и обрезает до max_len символов."""
+    line = text.split("\n")[0][:max_len]
+    line = line.replace("*", "").replace("_", "").replace("`", "")
+    return line
+
+
+def linkify_last_word(text: str, url: str) -> str:
+    """Вставляет ссылку внутрь последнего слова текста."""
+    words = text.rstrip().split(" ")
+    if not words:
+        return f"[текст]({url})"
+    last = words[-1].rstrip(".,!?;:")
+    punct = words[-1][len(last):]
+    words[-1] = f"[{last}]({url}){punct}"
+    return " ".join(words)
+
+
 def load_sent() -> set:
     if os.path.exists(SENT_FILE):
         with open(SENT_FILE, "r") as f:
@@ -131,8 +185,8 @@ def matches_keywords(text: str) -> list:
     return [kw for kw in KEYWORDS if kw.lower() in text_lower]
 
 
-async def fetch_new_posts(hours_back: int = 1, with_views: bool = False) -> list:
-    """Читает посты за последние N часов. with_views=True — собирает просмотры для топа."""
+async def fetch_new_posts(hours_back: int = 1) -> list:
+    """Читает посты за последние N часов."""
     client = TelegramClient("session_digest", API_ID, API_HASH)
     await client.start()
 
@@ -163,14 +217,11 @@ async def fetch_new_posts(hours_back: int = 1, with_views: bool = False) -> list
                 if not found_kw:
                     continue
 
-                # Защита от дублей по тексту
                 text_key = msg.message[:80].strip().lower()
                 if text_key in seen_texts:
-                    logger.info(f"⏭ Дубль пропущен из {channel}")
                     continue
                 seen_texts.add(text_key)
 
-                # Просмотры (только если запрашиваем для топа)
                 views = getattr(msg, "views", 0) or 0
 
                 results.append({
@@ -213,15 +264,19 @@ async def send_news():
     bot = telegram.Bot(token=BOT_TOKEN)
 
     for post in new_posts:
-        kw_str = ", ".join(post["keywords"][:3])
-        first_line = post["text"].split("\n")[0][:120].replace("*", "").replace("_", "").replace("`", "")
-        if len(first_line) == 120:
-            first_line += "..."
+        text = post["text"]
 
-        message = (
-            f"🔔 {first_line}\n"
-            f"[@{post['channel']}]({post['url']}) · _{kw_str}_"
-        )
+        # Переводим если узбекский
+        if is_uzbek(text):
+            logger.info(f"🌐 Перевод поста из {post['channel']}...")
+            text = translate_to_russian(text)
+
+        first_line = get_first_line(text)
+
+        # Ссылка внутри последнего слова
+        first_line_linked = linkify_last_word(first_line, post["url"])
+
+        message = f"{first_line_linked}"
 
         try:
             await bot.send_message(
@@ -243,7 +298,7 @@ async def send_daily_digest():
     """Ежедневный дайджест в 19:00 с топ-5 по просмотрам."""
     logger.info("📰 Отправка ежедневного дайджеста...")
 
-    posts = await fetch_new_posts(hours_back=21, with_views=True)  # с 00:00 до 21:00
+    posts = await fetch_new_posts(hours_back=21)
 
     if not posts:
         text = "📭 За сегодня не найдено новостей по вашим темам."
@@ -264,29 +319,35 @@ async def send_daily_digest():
         ch_name = CHANNEL_NAMES.get(channel, channel)
         lines.append(f"\n*{ch_name}*")
         for post in ch_posts:
-            first_line = post["text"].split("\n")[0][:100].replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
-            lines.append(f"→ {first_line} [...]({post['url']})\n")
+            text = post["text"]
+            if is_uzbek(text):
+                text = translate_to_russian(text)
+            first_line = get_first_line(text, max_len=100)
+            first_line_linked = linkify_last_word(f"→ {first_line}", post["url"])
+            lines.append(first_line_linked + "\n")
 
     digest_text = "\n".join(lines)
 
     # ── Часть 2: Топ-5 по просмотрам ──
     top5 = sorted(posts, key=lambda x: x["views"], reverse=True)[:5]
-
     top_lines = ["\n🔥 *Топ-5 постов дня по просмотрам*\n"]
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+
     for i, post in enumerate(top5):
         ch_name = CHANNEL_NAMES.get(post["channel"], post["channel"])
-        first_line = post["text"].split("\n")[0][:100].replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
+        text = post["text"]
+        if is_uzbek(text):
+            text = translate_to_russian(text)
+        first_line = get_first_line(text, max_len=100)
+        first_line_linked = linkify_last_word(first_line, post["url"])
         views_str = f"{post['views']:,}".replace(",", " ")
-        top_lines.append(f"{medals[i]} {first_line} [...]({post['url']})")
+        top_lines.append(f"{medals[i]} {first_line_linked}")
         top_lines.append(f"    👁 {views_str} просмотров · {ch_name}\n")
 
     top_text = "\n".join(top_lines)
-
-    # ── Отправка ──
-    bot = telegram.Bot(token=BOT_TOKEN)
     full_text = digest_text + top_text
 
+    bot = telegram.Bot(token=BOT_TOKEN)
     max_len = 4000
     parts = [full_text[i:i+max_len] for i in range(0, len(full_text), max_len)]
     for part in parts:
@@ -313,10 +374,7 @@ if __name__ == "__main__":
     logger.info("📡 Мониторинг каждый час с 10:00 до 22:00 по Ташкенту")
     logger.info("📰 Ежедневный дайджест + Топ-5 в 19:00 по Ташкенту")
 
-    # Проверка каждый час (каждые 60 минут)
     schedule.every(60).minutes.do(run_news)
-
-    # Ежедневный дайджест в 19:00 Ташкент = 14:00 UTC
     schedule.every().day.at("14:00").do(run_digest)
 
     # Тест — запустить сразу при старте (уберите # чтобы проверить):
