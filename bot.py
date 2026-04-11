@@ -445,8 +445,6 @@ async def send_daily_digest():
     # ── Часть 2: Топ-5 по просмотрам ──
     top5 = sorted(posts, key=lambda x: x["views"], reverse=True)[:5]
     top_lines = ["\n🔥 *Топ-5 постов дня по просмотрам*\n"]
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-
     for i, post in enumerate(top5):
         ch_name = CHANNEL_NAMES.get(post["channel"], post["channel"])
         text = post["text"]
@@ -455,8 +453,8 @@ async def send_daily_digest():
         first_line = get_first_line(text, max_len=100)
         first_line_linked = linkify_last_word(first_line, post["url"])
         views_str = f"{post['views']:,}".replace(",", " ")
-        top_lines.append(f"{medals[i]} {first_line_linked}")
-        top_lines.append(f"    👁 {views_str} просмотров · {ch_name}\n")
+        top_lines.append(f"{i+1}. {first_line_linked}")
+        top_lines.append(f"    {views_str} просмотров · {ch_name}\n")
 
     top_text = "\n".join(top_lines)
 
