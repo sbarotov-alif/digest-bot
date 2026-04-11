@@ -77,18 +77,7 @@ WORK_HOUR_START = 10
 WORK_HOUR_END = 22
 
 # Группы для саммари (ID → название)
-SUMMARY_GROUPS = {
-    -1001847678271: "Alif Nasiya Management",
-    -1002218040695: "Business & Sales",
-    -1001136626166: "Банкста",
-    -1001493909714: "Эффект Макаренко",
-    -1001111357944: "Spot.uz",
-    -1001196990666: "Законы и постановления BHB",
-    -4074026097:    "Risk / ALCO Committee",
-    -1003127782454: "Alif Business Team",
-    -1002164956446: "Alif Business | Management",
-    -841031124:     "Partners Team Management",
-}
+SUMMARY_GROUPS = {}
 
 # Файл для хранения уже отправленных постов
 SENT_FILE = "sent_posts.json"
