@@ -17,8 +17,6 @@ from telethon.tl.functions.messages import GetHistoryRequest
 import telegram
 import schedule
 import time
-import anthropic
-
 # ─────────────────────────────────────────────
 # НАСТРОЙКИ
 # ─────────────────────────────────────────────
@@ -27,8 +25,6 @@ API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 TARGET_CHANNEL = os.environ.get("TARGET_CHANNEL")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-
 # Каналы для мониторинга
 SOURCE_CHANNELS = [
     "spotuz",
@@ -110,41 +106,6 @@ CHANNEL_NAMES = {
 logging.basicConfig(level=logging.INFO, format="%(asctime)s — %(message)s")
 logger = logging.getLogger(__name__)
 
-
-def is_uzbek(text: str) -> bool:
-    """Определяет узбекский текст по характерным буквам и словам."""
-    uzbek_chars = "ʻʼ"
-    uzbek_words = ["va", "bu", "uchun", "bilan", "ham", "emas", "lekin",
-                   "ning", "dan", "ga", "da", "ni", "lar", "dir"]
-    text_lower = text.lower()
-    if any(c in text for c in uzbek_chars):
-        return True
-    word_count = sum(1 for w in uzbek_words if f" {w} " in f" {text_lower} ")
-    return word_count >= 2
-
-
-def translate_to_russian(text: str) -> str:
-    """Переводит текст на русский через Claude API."""
-    try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        "Переведи этот текст на русский язык. "
-                        "Верни ТОЛЬКО перевод, без пояснений и комментариев:\n\n"
-                        + text
-                    )
-                }
-            ]
-        )
-        return message.content[0].text.strip()
-    except Exception as e:
-        logger.error(f"❌ Ошибка перевода: {e}")
-        return text
 
 
 def get_first_line(text: str, max_len: int = 120) -> str:
@@ -281,37 +242,6 @@ async def fetch_group_messages(group_id: int, hours_back: int = 21) -> list:
     return messages
 
 
-def summarize_group(group_name: str, messages: list) -> str:
-    """Делает саммари переписки через Claude API."""
-    try:
-        if not messages:
-            return f"📭 Сообщений за день не найдено."
-
-        combined = "\n---\n".join(messages[:100])  # берём до 100 сообщений
-
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Вот переписка из рабочего чата '{group_name}' за сегодня.\n"
-                        "Сделай краткое резюме на русском языке:\n"
-                        "- Главные темы и вопросы которые обсуждались\n"
-                        "- Важные решения если были\n"
-                        "- Что требует внимания или ответа\n"
-                        "Пиши кратко и по делу, максимум 5-7 пунктов.\n\n"
-                        + combined
-                    )
-                }
-            ]
-        )
-        return message.content[0].text.strip()
-    except Exception as e:
-        logger.error(f"❌ Ошибка саммари {group_name}: {e}")
-        return "❌ Не удалось создать саммари."
 
 
 async def send_group_summaries():
@@ -380,11 +310,6 @@ async def send_news():
     for post in new_posts:
         text = post["text"]
 
-        # Переводим если узбекский
-        if is_uzbek(text):
-            logger.info(f"🌐 Перевод поста из {post['channel']}...")
-            text = translate_to_russian(text)
-
         first_line = get_first_line(text)
 
         # Ссылка внутри последнего слова
@@ -434,11 +359,8 @@ async def send_daily_digest():
         lines.append(f"\n*{ch_name}*")
         for post in ch_posts:
             text = post["text"]
-            if is_uzbek(text):
-                text = translate_to_russian(text)
             first_line = get_first_line(text, max_len=100)
             first_line_linked = linkify_last_word(f"→ {first_line}", post["url"])
-            lines.append(first_line_linked + "\n")
 
     digest_text = "\n".join(lines)
 
@@ -448,8 +370,6 @@ async def send_daily_digest():
     for i, post in enumerate(top5):
         ch_name = CHANNEL_NAMES.get(post["channel"], post["channel"])
         text = post["text"]
-        if is_uzbek(text):
-            text = translate_to_russian(text)
         first_line = get_first_line(text, max_len=100)
         first_line_linked = linkify_last_word(first_line, post["url"])
         views_str = f"{post['views']:,}".replace(",", " ")
