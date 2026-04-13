@@ -427,7 +427,7 @@ if __name__ == "__main__":
     schedule.every().day.at("14:05").do(run_summaries) # 19:05 Ташкент
 
     # Тест — запустить сразу при старте (уберите # чтобы проверить):
-    run_news()
+    # run_news()
     # run_digest()
     # run_summaries()
 
